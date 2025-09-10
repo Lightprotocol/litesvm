@@ -73,6 +73,17 @@ impl AccountsDb {
         self.inner.get(pubkey).map(|acc| acc.to_owned())
     }
 
+    pub(crate) fn get_program_accounts(
+        &self,
+        program_id: &Pubkey,
+    ) -> Vec<(Pubkey, AccountSharedData)> {
+        self.inner
+            .iter()
+            .filter(|account| account.1.owner() == program_id)
+            .map(|x| (x.0.to_owned(), x.1.to_owned()))
+            .collect::<Vec<_>>()
+    }
+
     /// We should only use this when we know we're not touching any executable or sysvar accounts,
     /// or have already handled such cases.
     pub(crate) fn add_account_no_checks(&mut self, pubkey: Pubkey, account: AccountSharedData) {
