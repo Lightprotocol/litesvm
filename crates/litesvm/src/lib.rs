@@ -598,6 +598,16 @@ impl LiteSVM {
         self.accounts.get_account(pubkey).map(Into::into)
     }
 
+    /// Returns all accounts owned by the provided program id.
+    pub fn get_program_accounts(&self, program_id: &Pubkey) -> Vec<(Pubkey, Account)> {
+        self.accounts
+            .inner
+            .iter()
+            .filter(|(_, account)| account.owner() == program_id)
+            .map(|(pubkey, account)| (*pubkey, Account::from(account.clone())))
+            .collect()
+    }
+
     /// Sets all information associated with the account of the provided pubkey.
     pub fn set_account(&mut self, pubkey: Pubkey, data: Account) -> Result<(), LiteSVMError> {
         self.accounts.add_account(pubkey, data.into())
