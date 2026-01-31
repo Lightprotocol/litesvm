@@ -404,6 +404,7 @@ pub struct LiteSVM {
     /// register trace consumption.
     #[cfg(feature = "invocation-inspect-callback")]
     enable_register_tracing: bool,
+    transaction_callback: Option<Arc<dyn Fn(&VersionedTransaction, &TransactionResult, &LiteSVM)>>,
 }
 
 impl Default for LiteSVM {
@@ -440,6 +441,7 @@ impl LiteSVM {
             enable_register_tracing: _enable_register_tracing,
             #[cfg(feature = "invocation-inspect-callback")]
             invocation_inspect_callback: Arc::new(EmptyInvocationInspectCallback {}),
+            transaction_callback: None,
         };
 
         #[cfg(feature = "register-tracing")]
@@ -672,6 +674,31 @@ impl LiteSVM {
     pub fn with_log_bytes_limit(mut self, limit: Option<usize>) -> Self {
         self.set_log_bytes_limit(limit);
         self
+    }
+
+    /// Sets a callback that fires after every [`send_transaction`](LiteSVM::send_transaction) call.
+    ///
+    /// The callback receives the original transaction, the transaction result,
+    /// and a reference to the post-transaction VM state.
+    pub fn with_transaction_callback(
+        mut self,
+        callback: impl Fn(&VersionedTransaction, &TransactionResult, &LiteSVM) + 'static,
+    ) -> Self {
+        self.transaction_callback = Some(Arc::new(callback));
+        self
+    }
+
+    /// Sets a callback that fires after every [`send_transaction`](LiteSVM::send_transaction) call.
+    pub fn set_transaction_callback(
+        &mut self,
+        callback: impl Fn(&VersionedTransaction, &TransactionResult, &LiteSVM) + 'static,
+    ) {
+        self.transaction_callback = Some(Arc::new(callback));
+    }
+
+    /// Removes the transaction callback.
+    pub fn unset_transaction_callback(&mut self) {
+        self.transaction_callback = None;
     }
 
     #[cfg_attr(feature = "nodejs-internal", qualifiers(pub))]
@@ -1327,6 +1354,8 @@ impl LiteSVM {
         };
         let log_collector = Rc::new(RefCell::new(log_collector));
         let vtx: VersionedTransaction = tx.into();
+        let callback = self.transaction_callback.clone();
+        let vtx_clone = callback.as_ref().map(|_| vtx.clone());
         let ExecutionResult {
             post_accounts,
             tx_result,
@@ -1353,7 +1382,7 @@ impl LiteSVM {
             fee,
         };
 
-        if let Err(tx_err) = tx_result {
+        let result = if let Err(tx_err) = tx_result {
             let err = TransactionResult::Err(FailedTransactionMetadata { err: tx_err, meta });
             if included {
                 self.history.add_new_transaction(signature, err.clone());
@@ -1367,7 +1396,13 @@ impl LiteSVM {
                 .expect("It shouldn't be possible to write invalid sysvars in send_transaction.");
 
             TransactionResult::Ok(meta)
+        };
+
+        if let (Some(cb), Some(vtx)) = (callback, vtx_clone) {
+            cb(&vtx, &result, self);
         }
+
+        result
     }
 
     /// Simulates a transaction.
